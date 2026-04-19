@@ -1,4 +1,5 @@
 from django.shortcuts import render, get_object_or_404, redirect
+from django.http import HttpResponse
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from django.utils import timezone
@@ -90,3 +91,16 @@ def join_session(request, session_id):
     Attendance.objects.get_or_create(user=request.user, session=session)
 
     return redirect(session.zoom_meeting_url)
+
+
+@login_required
+def export_schedule_ical(request, slug):
+    conference = get_object_or_404(Conference, slug=slug)
+    sessions = Session.objects.filter(conference=conference, is_published=True).order_by('start_time')
+
+    from .ical import generate_schedule_ical
+    ical_data = generate_schedule_ical(sessions, conference)
+
+    response = HttpResponse(ical_data, content_type='text/calendar')
+    response['Content-Disposition'] = f'attachment; filename="{conference.slug}_schedule.ics"'
+    return response

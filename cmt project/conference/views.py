@@ -1,7 +1,9 @@
 from django.shortcuts import render, get_object_or_404, redirect
 from django.urls import reverse
 from django.http import HttpResponse
-from .models import Conference, Payment, RegistrationTier
+from django.conf import settings as django_settings
+from django.core.paginator import Paginator
+from .models import Conference, Payment, RegistrationTier, PromoCode
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
 from submissions.emails import send_registration_confirmation
@@ -9,7 +11,12 @@ from submissions.emails import send_registration_confirmation
 @login_required
 def conference_list_view(request):
     conferences = Conference.objects.all()
-    return render(request, 'conference/conference_list.html', {'conferences': conferences})
+    paginator = Paginator(conferences, 20)
+    page_obj = paginator.get_page(request.GET.get('page'))
+    return render(request, 'conference/conference_list.html', {
+        'conferences': page_obj,
+        'page_obj': page_obj,
+    })
 
 @login_required
 def conference_detail_view(request, slug):
@@ -18,10 +25,9 @@ def conference_detail_view(request, slug):
 
 @login_required
 def payment_checkout(request, slug):
-    """Payment checkout - shows payment form and processes payment"""
+    """Payment checkout - shows payment form and redirects to PayPal payment link."""
     conference = get_object_or_404(Conference, slug=slug)
-    
-    # Check if user already has a membership for this conference
+
     from membership.models import Membership
     try:
         membership = Membership.objects.get(user=request.user, conference=conference)
@@ -29,20 +35,16 @@ def payment_checkout(request, slug):
             messages.info(request, f"You already have access to {conference.conference_name}.")
             return redirect('conference_detail', slug=slug)
     except Membership.DoesNotExist:
-        # Create membership if it doesn't exist
         membership = Membership.objects.create(
             user=request.user,
             conference=conference,
             is_paid=False
         )
-    
-    # Get available registration tiers
+
     tiers = RegistrationTier.objects.filter(conference=conference, is_active=True)
     is_member = request.user.iatm_membership
 
-    # Determine pricing: use tiers if configured, else fallback to legacy pricing
     if tiers.exists():
-        # Build tier pricing info for display
         tier_pricing = []
         for tier in tiers:
             current_price = tier.get_current_price(is_member=is_member)
@@ -53,96 +55,70 @@ def payment_checkout(request, slug):
                 'is_discounted': current_price < float(tier.price),
             })
     else:
-        # Legacy fallback: Student $50 / Regular $100
         tier_pricing = None
 
     if request.method == 'POST':
-        # Determine amount from selected tier or legacy pricing
         selected_tier = None
         if tiers.exists():
             tier_id = request.POST.get('tier_id')
             if tier_id:
                 selected_tier = get_object_or_404(RegistrationTier, id=tier_id, conference=conference)
                 amount = selected_tier.get_current_price(is_member=is_member)
-                price_type = selected_tier.name
             else:
                 messages.error(request, "Please select a registration tier.")
                 return redirect('payment_checkout', slug=slug)
         else:
-            # Legacy pricing
             if request.user.occupation in ['student_undergraduate', 'student_graduate']:
                 amount = 50.00
-                price_type = "Student"
             else:
                 amount = 100.00
-                price_type = "Regular"
 
-        # Process PayPal payment
-        try:
-            from paypal_checkout_sdk.services import OrdersService
-            from paypal_checkout_sdk.models.orders import CreateOrderRequest
-            from paypal_config import get_paypal_client
+        # Apply promo code if provided
+        promo_code_str = request.POST.get('promo_code', '').strip().upper()
+        applied_promo = None
+        if promo_code_str:
+            try:
+                promo = PromoCode.objects.get(conference=conference, code__iexact=promo_code_str)
+                if promo.is_valid:
+                    amount = promo.apply_discount(amount)
+                    applied_promo = promo
+                else:
+                    messages.warning(request, "This promo code is no longer valid.")
+            except PromoCode.DoesNotExist:
+                messages.warning(request, "Invalid promo code.")
 
-            order_data = {
-                "intent": "CAPTURE",
-                "purchase_units": [{
-                    "reference_id": f"conf_{conference.id}_user_{request.user.id}",
-                    "description": f"{conference.conference_name} - {price_type} Registration",
-                    "amount": {
-                        "currency_code": "USD",
-                        "value": str(amount)
-                    }
-                }],
-                "application_context": {
-                    "return_url": request.build_absolute_uri(reverse('payment_success', kwargs={'slug': slug})),
-                    "cancel_url": request.build_absolute_uri(reverse('payment_cancel', kwargs={'slug': slug})),
-                    "brand_name": "IATM Conference",
-                    "landing_page": "BILLING",
-                    "user_action": "PAY_NOW",
-                    "shipping_preference": "NO_SHIPPING"
-                }
-            }
+        # Create pending payment record
+        payment = Payment.objects.create(
+            user=request.user,
+            conference=conference,
+            tier=selected_tier,
+            amount=amount,
+            promo_code=applied_promo,
+            status='pending'
+        )
 
-            request_paypal = CreateOrderRequest(**order_data)
-            client = get_paypal_client()
-            orders_service = OrdersService(client)
-            response = orders_service.create_order(request_paypal)
+        # Increment promo code usage
+        if applied_promo:
+            applied_promo.times_used += 1
+            applied_promo.save(update_fields=['times_used'])
 
-            # Create Payment record
-            Payment.objects.create(
-                user=request.user,
-                conference=conference,
-                tier=selected_tier,
-                amount=amount,
-                paypal_order_id=response.id,
-                status='pending'
-            )
+        # Store payment info in session for when user returns
+        request.session['pending_payment_id'] = payment.id
+        request.session['conference_slug'] = slug
 
-            request.session['paypal_order_id'] = response.id
-            request.session['conference_slug'] = slug
+        # Redirect to PayPal NCP payment link
+        paypal_link = django_settings.PAYPAL_PAYMENT_LINK
+        return redirect(paypal_link)
 
-            if hasattr(response, 'links') and response.links:
-                for link in response.links:
-                    if hasattr(link, 'rel') and link.rel == "approve":
-                        if hasattr(link, 'href'):
-                            return redirect(str(link.href))
-
-            return redirect(f"https://www.paypal.com/checkoutnow?token={response.id}")
-
-        except Exception as e:
-            messages.error(request, f"Payment error: {str(e)}")
-            return redirect('conference_detail', slug=slug)
-
-    # Show payment form
     context = {
         'conference': conference,
         'membership': membership,
         'tier_pricing': tier_pricing,
         'is_member': is_member,
         'is_early_bird': conference.is_early_bird,
+        'paypal_link': django_settings.PAYPAL_PAYMENT_LINK,
     }
 
-    # Legacy fallback context
     if not tier_pricing:
         if request.user.occupation in ['student_undergraduate', 'student_graduate']:
             context['amount'] = 50.00
@@ -155,90 +131,57 @@ def payment_checkout(request, slug):
 
 @login_required
 def payment_success(request, slug):
-    """Handle successful PayPal payment"""
+    """Handle return from PayPal - mark payment as awaiting confirmation."""
     conference = get_object_or_404(Conference, slug=slug)
-    
-    # Get PayPal order ID from session
-    paypal_order_id = request.session.get('paypal_order_id')
+
+    pending_payment_id = request.session.get('pending_payment_id')
     conference_slug = request.session.get('conference_slug')
-    
-    if not paypal_order_id or conference_slug != slug:
-        messages.error(request, "Invalid payment session")
-        return redirect('conference_detail', slug=slug)
-    
-    try:
-        from paypal_checkout_sdk.services import OrdersService
-        from paypal_config import get_paypal_client
-        
-        # Capture the payment using OrdersService
-        client = get_paypal_client()
-        orders_service = OrdersService(client)
-        response = orders_service.capture_order(paypal_order_id)
-        
-        if response.status == "COMPLETED":
-            # Update membership to paid
-            from membership.models import Membership
-            membership = Membership.objects.get(user=request.user, conference=conference)
-            membership.is_paid = True
-            membership.save()
 
-            # Update Payment record
-            try:
-                payment = Payment.objects.get(paypal_order_id=paypal_order_id)
+    if pending_payment_id and conference_slug == slug:
+        try:
+            payment = Payment.objects.get(id=pending_payment_id, user=request.user)
+            if payment.status == 'pending':
                 payment.status = 'completed'
-                # Extract capture ID if available
-                if hasattr(response, 'purchase_units') and response.purchase_units:
-                    pu = response.purchase_units[0]
-                    if hasattr(pu, 'payments') and hasattr(pu.payments, 'captures') and pu.payments.captures:
-                        payment.paypal_payment_id = pu.payments.captures[0].id
                 payment.save()
-            except Payment.DoesNotExist:
-                pass
 
-            # Clear session data
-            if 'paypal_order_id' in request.session:
-                del request.session['paypal_order_id']
-            if 'conference_slug' in request.session:
-                del request.session['conference_slug']
+                # Mark membership as paid
+                from membership.models import Membership
+                try:
+                    membership = Membership.objects.get(user=request.user, conference=conference)
+                    membership.is_paid = True
+                    membership.save()
+                    send_registration_confirmation(request.user, conference, membership, request=request)
+                except Membership.DoesNotExist:
+                    pass
 
-            send_registration_confirmation(request.user, conference, membership, request=request)
-            messages.success(request, f"Payment successful! You now have access to {conference.conference_name}")
-            return redirect('conference_detail', slug=slug)
-        else:
-            # Mark payment as failed
-            try:
-                payment = Payment.objects.get(paypal_order_id=paypal_order_id)
-                payment.status = 'failed'
-                payment.save()
-            except Payment.DoesNotExist:
-                pass
-            messages.error(request, "Payment was not completed successfully")
-            return redirect('conference_detail', slug=slug)
-            
-    except Exception as e:
-        messages.error(request, f"Payment verification error: {str(e)}")
-        return redirect('conference_detail', slug=slug)
+                messages.success(request, f"Payment confirmed! You now have access to {conference.conference_name}.")
+        except Payment.DoesNotExist:
+            messages.error(request, "Payment record not found.")
+    else:
+        messages.error(request, "Invalid payment session.")
+
+    # Clear session data
+    request.session.pop('pending_payment_id', None)
+    request.session.pop('conference_slug', None)
+
+    return redirect('conference_detail', slug=slug)
 
 @login_required
 def payment_cancel(request, slug):
-    """Handle cancelled PayPal payment"""
+    """Handle cancelled PayPal payment."""
     conference = get_object_or_404(Conference, slug=slug)
 
-    # Mark Payment as cancelled
-    paypal_order_id = request.session.get('paypal_order_id')
-    if paypal_order_id:
+    pending_payment_id = request.session.get('pending_payment_id')
+    if pending_payment_id:
         try:
-            payment = Payment.objects.get(paypal_order_id=paypal_order_id)
+            payment = Payment.objects.get(id=pending_payment_id, user=request.user)
             payment.status = 'cancelled'
             payment.save()
         except Payment.DoesNotExist:
             pass
 
-    # Clear session data
-    if 'paypal_order_id' in request.session:
-        del request.session['paypal_order_id']
-    if 'conference_slug' in request.session:
-        del request.session['conference_slug']
+    request.session.pop('pending_payment_id', None)
+    request.session.pop('conference_slug', None)
 
     messages.info(request, "Payment was cancelled. You can try again anytime.")
     return redirect('conference_detail', slug=slug)
@@ -262,7 +205,6 @@ def user_dashboard(request):
         Q(co_author3=request.user)
     ).select_related('membership__conference', 'track').distinct()
 
-    # Personalized schedule: upcoming sessions for conferences the user is registered (paid) for
     paid_conferences = memberships.filter(is_paid=True).values_list('conference_id', flat=True)
     upcoming_sessions = Session.objects.filter(
         conference_id__in=paid_conferences,
@@ -270,7 +212,6 @@ def user_dashboard(request):
         end_time__gte=timezone.now(),
     ).select_related('conference', 'track').prefetch_related('speakers').order_by('start_time')[:10]
 
-    # Conferences eligible for certificate (past conferences where user attended sessions)
     from schedule.models import Attendance
     past_paid_memberships = memberships.filter(
         is_paid=True,
@@ -313,13 +254,11 @@ def download_certificate(request, membership_id):
 
     membership = get_object_or_404(Membership, id=membership_id, user=request.user, is_paid=True)
 
-    # Conference must be over
     from django.utils import timezone
     if membership.conference.end_date >= timezone.now().date():
         messages.error(request, "Certificates are available after the conference ends.")
         return redirect('user_dashboard')
 
-    # User must have attended at least one session
     attendance_count = Attendance.objects.filter(
         user=request.user, session__conference=membership.conference
     ).count()

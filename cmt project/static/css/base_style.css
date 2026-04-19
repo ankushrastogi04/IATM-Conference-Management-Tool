@@ -9,6 +9,9 @@ html {
 .navbar-brand .logo {
     max-height: 50px;
     width: auto;
+    background: #fff;
+    padding: 4px 8px;
+    border-radius: 6px;
 }
 
 
@@ -44,4 +47,32 @@ html {
     .nav-link {
         padding: 10px 0;
     }
+}
+
+/* Accessibility - Focus Indicators */
+*:focus-visible {
+    outline: 3px solid #4f46e5;
+    outline-offset: 2px;
+}
+
+.nav-link:focus-visible {
+    outline-color: white;
+    background: rgba(255, 255, 255, 0.15);
+}
+
+.btn:focus-visible {
+    box-shadow: 0 0 0 3px rgba(79, 70, 229, 0.5);
+}
+
+/* Screen reader only text */
+.sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
 }

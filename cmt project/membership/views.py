@@ -1,4 +1,5 @@
 import csv
+import json
 from django.shortcuts import render, redirect, get_object_or_404
 from django.contrib.auth.decorators import login_required
 from django.contrib import messages
@@ -6,6 +7,7 @@ from django.http import HttpResponse
 from django.db.models import Sum, Count, Q
 from django.core.mail import send_mail
 from django.conf import settings
+from django.core.paginator import Paginator
 from conference.models import Conference, Payment
 from .models import Membership, Role
 from .forms import MembershipForm
@@ -22,7 +24,7 @@ def networking_hub(request, slug):
         messages.error(request, "You must be a paid registrant to access the networking hub.")
         return redirect('conference_detail', slug=slug)
 
-    attendees = Membership.objects.filter(conference=conference, is_paid=True).select_related('user')
+    attendees = Membership.objects.filter(conference=conference, is_paid=True).select_related('user').order_by('user__last_name', 'user__first_name')
 
     query = request.GET.get('q', '')
     if query:
@@ -33,9 +35,13 @@ def networking_hub(request, slug):
             Q(user__country__icontains=query)
         )
 
+    paginator = Paginator(attendees, 20)
+    page_obj = paginator.get_page(request.GET.get('page'))
+
     context = {
         'conference': conference,
-        'attendees': attendees,
+        'attendees': page_obj,
+        'page_obj': page_obj,
         'query': query,
     }
     return render(request, 'membership/networking_hub.html', context)
@@ -118,68 +124,23 @@ def group_registration(request, slug):
 
             total_amount = round(unit_price * count, 2)
 
-            # Create PayPal order for group
-            try:
-                from paypal_checkout_sdk.services import OrdersService
-                from paypal_checkout_sdk.models.orders import CreateOrderRequest
-                from paypal_config import get_paypal_client
-                from django.urls import reverse
+            # Create pending payment record
+            payment = Payment.objects.create(
+                user=request.user,
+                conference=conference,
+                tier=tier,
+                amount=total_amount,
+                status='pending'
+            )
 
-                order_data = {
-                    "intent": "CAPTURE",
-                    "purchase_units": [{
-                        "reference_id": f"group_{conference.id}_by_{request.user.id}",
-                        "description": f"{conference.conference_name} - Group {tier_name} x{count}",
-                        "amount": {
-                            "currency_code": "USD",
-                            "value": str(total_amount)
-                        }
-                    }],
-                    "application_context": {
-                        "return_url": request.build_absolute_uri(
-                            reverse('group_payment_success', kwargs={'slug': slug})
-                        ),
-                        "cancel_url": request.build_absolute_uri(
-                            reverse('group_registration', kwargs={'slug': slug})
-                        ),
-                        "brand_name": "IATM Conference",
-                        "landing_page": "BILLING",
-                        "user_action": "PAY_NOW",
-                        "shipping_preference": "NO_SHIPPING"
-                    }
-                }
+            # Store group info in session for post-payment processing
+            request.session['group_payment_id'] = payment.id
+            request.session['group_member_ids'] = list(unpaid.values_list('id', flat=True))
+            request.session['group_conference_slug'] = slug
 
-                request_paypal = CreateOrderRequest(**order_data)
-                client = get_paypal_client()
-                orders_service = OrdersService(client)
-                response = orders_service.create_order(request_paypal)
-
-                # Create Payment record for the paying user
-                Payment.objects.create(
-                    user=request.user,
-                    conference=conference,
-                    tier=tier,
-                    amount=total_amount,
-                    paypal_order_id=response.id,
-                    status='pending'
-                )
-
-                # Store group info in session for post-payment processing
-                request.session['group_paypal_order_id'] = response.id
-                request.session['group_member_ids'] = list(unpaid.values_list('id', flat=True))
-                request.session['group_conference_slug'] = slug
-
-                if hasattr(response, 'links') and response.links:
-                    for link in response.links:
-                        if hasattr(link, 'rel') and link.rel == "approve":
-                            if hasattr(link, 'href'):
-                                return redirect(str(link.href))
-
-                return redirect(f"https://www.paypal.com/checkoutnow?token={response.id}")
-
-            except Exception as e:
-                messages.error(request, f"Payment error: {str(e)}")
-                return redirect('group_registration', slug=slug)
+            # Redirect to PayPal NCP payment link
+            paypal_link = settings.PAYPAL_PAYMENT_LINK
+            return redirect(paypal_link)
 
     # GET: show form with unpaid members and tier selection
     memberships = Membership.objects.filter(conference=conference).select_related('user').order_by('-created_at')[:20]
@@ -208,60 +169,40 @@ def group_registration(request, slug):
 
 @login_required
 def group_payment_success(request, slug):
-    """Handle successful PayPal payment for group registration."""
+    """Handle return from PayPal for group registration."""
     conference = get_object_or_404(Conference, slug=slug)
 
-    paypal_order_id = request.session.get('group_paypal_order_id')
+    group_payment_id = request.session.get('group_payment_id')
     member_ids = request.session.get('group_member_ids', [])
     conf_slug = request.session.get('group_conference_slug')
 
-    if not paypal_order_id or conf_slug != slug:
+    if not group_payment_id or conf_slug != slug:
         messages.error(request, "Invalid payment session.")
         return redirect('group_registration', slug=slug)
 
     try:
-        from paypal_checkout_sdk.services import OrdersService
-        from paypal_config import get_paypal_client
+        payment = Payment.objects.get(id=group_payment_id, user=request.user)
+        if payment.status == 'pending':
+            payment.status = 'completed'
+            payment.save()
 
-        client = get_paypal_client()
-        orders_service = OrdersService(client)
-        response = orders_service.capture_order(paypal_order_id)
-
-        if response.status == "COMPLETED":
             # Mark all group members as paid
-            paid_count = Membership.objects.filter(id__in=member_ids, conference=conference).update(is_paid=True)
+            paid_count = Membership.objects.filter(
+                id__in=member_ids, conference=conference
+            ).update(is_paid=True)
 
-            # Update Payment record
-            try:
-                payment = Payment.objects.get(paypal_order_id=paypal_order_id)
-                payment.status = 'completed'
-                if hasattr(response, 'purchase_units') and response.purchase_units:
-                    pu = response.purchase_units[0]
-                    if hasattr(pu, 'payments') and hasattr(pu.payments, 'captures') and pu.payments.captures:
-                        payment.paypal_payment_id = pu.payments.captures[0].id
-                payment.save()
-            except Payment.DoesNotExist:
-                pass
+            messages.success(
+                request,
+                f"Group payment confirmed! {paid_count} attendee(s) are now registered."
+            )
+    except Payment.DoesNotExist:
+        messages.error(request, "Payment record not found.")
 
-            # Clear session
-            for key in ['group_paypal_order_id', 'group_member_ids', 'group_conference_slug']:
-                request.session.pop(key, None)
+    # Clear session
+    for key in ['group_payment_id', 'group_member_ids', 'group_conference_slug']:
+        request.session.pop(key, None)
 
-            messages.success(request, f"Group payment successful! {paid_count} attendee(s) are now registered.")
-            return redirect('group_registration', slug=slug)
-        else:
-            try:
-                payment = Payment.objects.get(paypal_order_id=paypal_order_id)
-                payment.status = 'failed'
-                payment.save()
-            except Payment.DoesNotExist:
-                pass
-            messages.error(request, "Payment was not completed successfully.")
-            return redirect('group_registration', slug=slug)
-
-    except Exception as e:
-        messages.error(request, f"Payment verification error: {str(e)}")
-        return redirect('group_registration', slug=slug)
+    return redirect('group_registration', slug=slug)
 
 
 @login_required
@@ -299,22 +240,27 @@ def admin_conference_dashboard_view(request, slug):
     memberships = Membership.objects.filter(conference=conference).select_related('user').exclude(user__is_staff=True)
 
     if request.method == 'POST':
+        action = request.POST.get('action', 'update_roles')
         member_id = request.POST.get('membership_id')
-        role1 = request.POST.get('role1')
-        role2 = request.POST.get('role2')
-        # Removed action/status update
-
         membership = Membership.objects.get(id=member_id)
-        membership.role1 = role1
-        membership.role2 = role2
 
-        membership.save()
+        if action == 'toggle_payment':
+            membership.is_paid = not membership.is_paid
+            membership.save()
+            status = "paid" if membership.is_paid else "unpaid"
+            messages.success(request, f"{membership.user.get_full_name()} marked as {status}.")
+        else:
+            role1 = request.POST.get('role1')
+            role2 = request.POST.get('role2')
+            membership.role1 = role1
+            membership.role2 = role2
+            membership.save()
+
         return redirect('admin_conference_dashboard', slug=slug)
 
-    # No status-based filtering here anymore
     return render(request, 'conference/admin_dashboard.html', {
         'conference': conference,
-        'memberships': memberships,  # all memberships passed to template
+        'memberships': memberships,
         'Role': Role,
     })
 
@@ -360,6 +306,10 @@ def admin_analytics_view(request, slug):
         'chairs': chairs,
         'country_stats': country_stats,
         'occupation_stats': occupation_stats,
+        'country_labels': json.dumps([str(c['user__country'] or 'Unknown') for c in country_stats]),
+        'country_data': json.dumps([c['count'] for c in country_stats]),
+        'occupation_labels': json.dumps([str(o['user__occupation'] or 'Unknown') for o in occupation_stats]),
+        'occupation_data': json.dumps([o['count'] for o in occupation_stats]),
     }
     return render(request, 'membership/admin_analytics.html', context)
 

@@ -3,6 +3,20 @@ from django.conf import settings
 from conference.models import Conference, Track
 
 
+class Room(models.Model):
+    conference = models.ForeignKey(Conference, on_delete=models.CASCADE, related_name='rooms')
+    name = models.CharField(max_length=100)
+    capacity = models.PositiveIntegerField(default=0, help_text="0 = unlimited")
+    location_description = models.CharField(max_length=200, blank=True)
+
+    class Meta:
+        unique_together = ('conference', 'name')
+        ordering = ['name']
+
+    def __str__(self):
+        return f"{self.name} ({self.conference.conference_name})"
+
+
 class Speaker(models.Model):
     """Speaker profile with bio, photo, and linked sessions."""
     user = models.OneToOneField(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, null=True, blank=True, related_name='speaker_profile')
@@ -48,6 +62,7 @@ class Session(models.Model):
     start_time = models.DateTimeField()
     end_time = models.DateTimeField()
     room = models.CharField(max_length=100, blank=True)
+    venue = models.ForeignKey(Room, on_delete=models.SET_NULL, null=True, blank=True, related_name='sessions')
 
     # Virtual meeting
     zoom_meeting_id = models.CharField(max_length=100, blank=True)
@@ -62,6 +77,19 @@ class Session(models.Model):
 
     def __str__(self):
         return f"{self.title} ({self.start_time.strftime('%b %d %H:%M')})"
+
+    def clean(self):
+        from django.core.exceptions import ValidationError
+        if self.venue:
+            overlapping = Session.objects.filter(
+                venue=self.venue,
+                start_time__lt=self.end_time,
+                end_time__gt=self.start_time,
+            ).exclude(pk=self.pk)
+            if overlapping.exists():
+                raise ValidationError(f"Room '{self.venue.name}' has a conflicting session: {overlapping.first().title}")
+        if self.start_time and self.end_time and self.start_time >= self.end_time:
+            raise ValidationError("End time must be after start time.")
 
     @property
     def duration_minutes(self):

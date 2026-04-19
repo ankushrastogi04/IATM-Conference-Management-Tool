@@ -30,7 +30,6 @@ urlpatterns = [
     path('membership/', include('membership.urls')),
     path('submissions/', include('submissions.urls')),
     path('review/', include('review.urls')),
-    # path('payments/', include('payments.urls')),  # Removed for now
 ]
 
 # Serve static files in development

@@ -1,10 +1,17 @@
-from django.core.mail import send_mail
+import threading
+import logging
+from django.core.mail import send_mail, EmailMultiAlternatives
 from django.template.loader import render_to_string
 from django.conf import settings
 from django.utils import timezone
-import logging
 
 logger = logging.getLogger(__name__)
+
+
+def _send_in_background(fn, *args, **kwargs):
+    """Run an email-sending function in a background thread."""
+    thread = threading.Thread(target=fn, args=args, kwargs=kwargs, daemon=True)
+    thread.start()
 
 
 def send_submission_confirmation(submission, request=None):
@@ -12,13 +19,11 @@ def send_submission_confirmation(submission, request=None):
     conference = submission.membership.conference
     author = submission.membership.user
 
-    # Build author list
     authors = [author]
     for co_author in [submission.co_author1, submission.co_author2, submission.co_author3]:
         if co_author:
             authors.append(co_author)
 
-    # Build URLs
     base_url = request.build_absolute_uri('/') if request else ''
     submission_url = f"{base_url}submissions/{submission.pk}/"
     conference_url = f"{base_url}conference/{conference.slug}/"
@@ -33,19 +38,21 @@ def send_submission_confirmation(submission, request=None):
     }
 
     html_message = render_to_string('submissions/emails/submission_confirmation.html', context)
-
-    # Send to all authors
     recipients = [a.email for a in authors]
-    try:
-        send_mail(
-            subject=f"Submission Confirmation: {submission.paper_title}",
-            message=f"Your paper '{submission.paper_title}' has been submitted to {conference.conference_name}.",
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=recipients,
-            html_message=html_message,
-        )
-    except Exception as e:
-        logger.error(f"Failed to send submission confirmation email: {e}")
+
+    def _send():
+        try:
+            send_mail(
+                subject=f"Submission Confirmation: {submission.paper_title}",
+                message=f"Your paper '{submission.paper_title}' has been submitted to {conference.conference_name}.",
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=recipients,
+                html_message=html_message,
+            )
+        except Exception as e:
+            logger.error(f"Failed to send submission confirmation email: {e}")
+
+    _send_in_background(_send)
 
 
 def send_reviewer_assignment(review, request=None):
@@ -71,16 +78,19 @@ def send_reviewer_assignment(review, request=None):
 
     html_message = render_to_string('submissions/emails/reviewer_assignment.html', context)
 
-    try:
-        send_mail(
-            subject=f"Review Assignment: {submission.paper_title}",
-            message=f"You have been assigned to review '{submission.paper_title}' for {conference.conference_name}.",
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=[reviewer.email],
-            html_message=html_message,
-        )
-    except Exception as e:
-        logger.error(f"Failed to send reviewer assignment email: {e}")
+    def _send():
+        try:
+            send_mail(
+                subject=f"Review Assignment: {submission.paper_title}",
+                message=f"You have been assigned to review '{submission.paper_title}' for {conference.conference_name}.",
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=[reviewer.email],
+                html_message=html_message,
+            )
+        except Exception as e:
+            logger.error(f"Failed to send reviewer assignment email: {e}")
+
+    _send_in_background(_send)
 
 
 def send_review_notification(review, request=None):
@@ -88,7 +98,6 @@ def send_review_notification(review, request=None):
     submission = review.submission
     conference = submission.membership.conference
     author = submission.membership.user
-    reviewer = review.reviewer
 
     base_url = request.build_absolute_uri('/') if request else ''
     submission_url = f"{base_url}submissions/{submission.pk}/"
@@ -98,7 +107,7 @@ def send_review_notification(review, request=None):
         'conference': conference,
         'submission': submission,
         'review': review,
-        'reviewer': reviewer,
+        'reviewer': review.reviewer,
         'review_date': timezone.now().strftime('%B %d, %Y'),
         'submission_url': submission_url,
         'conference_url': conference_url,
@@ -106,22 +115,24 @@ def send_review_notification(review, request=None):
 
     html_message = render_to_string('submissions/emails/review_notification.html', context)
 
-    # Send to author and co-authors
     recipients = [author.email]
     for co_author in [submission.co_author1, submission.co_author2, submission.co_author3]:
         if co_author:
             recipients.append(co_author.email)
 
-    try:
-        send_mail(
-            subject=f"Review Received: {submission.paper_title}",
-            message=f"A review has been submitted for your paper '{submission.paper_title}'.",
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=recipients,
-            html_message=html_message,
-        )
-    except Exception as e:
-        logger.error(f"Failed to send review notification email: {e}")
+    def _send():
+        try:
+            send_mail(
+                subject=f"Review Received: {submission.paper_title}",
+                message=f"A review has been submitted for your paper '{submission.paper_title}'.",
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=recipients,
+                html_message=html_message,
+            )
+        except Exception as e:
+            logger.error(f"Failed to send review notification email: {e}")
+
+    _send_in_background(_send)
 
 
 def send_submission_decision(submission):
@@ -153,35 +164,34 @@ def send_submission_decision(submission):
 
     html_message = render_to_string('submissions/emails/submission_decision.html', context)
 
-    # Build recipient list (author + co-authors)
     recipients = [author.email]
     for co_author in [submission.co_author1, submission.co_author2, submission.co_author3]:
         if co_author:
             recipients.append(co_author.email)
 
-    try:
-        send_mail(
-            subject=f"Paper {decision_display}: {submission.paper_title}",
-            message=f"Your paper '{submission.paper_title}' has been {decision_display.lower()} for {conference.conference_name}.",
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            recipient_list=recipients,
-            html_message=html_message,
-        )
-    except Exception as e:
-        logger.error(f"Failed to send submission decision email: {e}")
+    def _send():
+        try:
+            send_mail(
+                subject=f"Paper {decision_display}: {submission.paper_title}",
+                message=f"Your paper '{submission.paper_title}' has been {decision_display.lower()} for {conference.conference_name}.",
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                recipient_list=recipients,
+                html_message=html_message,
+            )
+        except Exception as e:
+            logger.error(f"Failed to send submission decision email: {e}")
+
+    _send_in_background(_send)
 
 
 def send_registration_confirmation(user, conference, membership, request=None):
     """Send HTML confirmation email with attached invoice PDF after payment."""
-    from django.core.mail import EmailMultiAlternatives
     from conference.models import Payment
 
-    # Get the most recent completed payment for this user+conference
     payment = Payment.objects.filter(
         user=user, conference=conference, status='completed'
     ).order_by('-created_at').first()
 
-    # Build URLs
     base_url = request.build_absolute_uri('/') if request else ''
     dashboard_url = f"{base_url}conference/dashboard/"
     conference_url = f"{base_url}conference/{conference.slug}/"
@@ -209,28 +219,35 @@ def send_registration_confirmation(user, conference, membership, request=None):
         plain_message += f"Invoice: INV-{payment.id:06d}\n"
     plain_message += f"\nThank you for registering!\n\nIATM Conference Management System"
 
-    try:
-        email = EmailMultiAlternatives(
-            subject=f"Registration Confirmed: {conference.conference_name}",
-            body=plain_message,
-            from_email=settings.DEFAULT_FROM_EMAIL,
-            to=[user.email],
-        )
-        email.attach_alternative(html_message, "text/html")
+    # Pre-generate invoice PDF in the main thread (needs DB access)
+    invoice_data = None
+    if payment:
+        try:
+            from conference.invoice import generate_invoice_pdf
+            invoice_buffer = generate_invoice_pdf(payment)
+            invoice_data = (
+                f"IATM_Invoice_{payment.id:06d}.pdf",
+                invoice_buffer.getvalue(),
+                'application/pdf',
+            )
+        except Exception as e:
+            logger.error(f"Failed to generate invoice PDF: {e}")
 
-        # Attach invoice PDF if payment exists
-        if payment:
-            try:
-                from conference.invoice import generate_invoice_pdf
-                invoice_buffer = generate_invoice_pdf(payment)
-                email.attach(
-                    f"IATM_Invoice_{payment.id:06d}.pdf",
-                    invoice_buffer.getvalue(),
-                    'application/pdf',
-                )
-            except Exception as e:
-                logger.error(f"Failed to generate/attach invoice PDF: {e}")
+    def _send():
+        try:
+            email = EmailMultiAlternatives(
+                subject=f"Registration Confirmed: {conference.conference_name}",
+                body=plain_message,
+                from_email=settings.DEFAULT_FROM_EMAIL,
+                to=[user.email],
+            )
+            email.attach_alternative(html_message, "text/html")
 
-        email.send()
-    except Exception as e:
-        logger.error(f"Failed to send registration confirmation email: {e}")
+            if invoice_data:
+                email.attach(*invoice_data)
+
+            email.send()
+        except Exception as e:
+            logger.error(f"Failed to send registration confirmation email: {e}")
+
+    _send_in_background(_send)

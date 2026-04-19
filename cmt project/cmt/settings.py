@@ -12,10 +12,22 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 import os
+import sentry_sdk
 from dotenv import load_dotenv
 
 # Load environment variables from .env file
 load_dotenv()
+
+# Sentry error monitoring
+SENTRY_DSN = os.getenv('SENTRY_DSN', '')
+if SENTRY_DSN:
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        traces_sample_rate=float(os.getenv('SENTRY_TRACES_SAMPLE_RATE', '0.1')),
+        profiles_sample_rate=float(os.getenv('SENTRY_PROFILES_SAMPLE_RATE', '0.1')),
+        send_default_pii=False,
+        environment=os.getenv('SENTRY_ENVIRONMENT', 'production'),
+    )
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -55,7 +67,30 @@ INSTALLED_APPS = [
     "crispy_forms",
     "crispy_bootstrap5",
 
+    # CORS
+    "corsheaders",
+
+    # API
+    "rest_framework",
+    "django_filters",
 ]
+
+# Django REST Framework
+REST_FRAMEWORK = {
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.SessionAuthentication',
+    ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 20,
+    'DEFAULT_FILTER_BACKENDS': [
+        'django_filters.rest_framework.DjangoFilterBackend',
+        'rest_framework.filters.SearchFilter',
+        'rest_framework.filters.OrderingFilter',
+    ],
+}
 
 CRISPY_ALLOWED_TEMPLATE_PACKS = "bootstrap5"
 CRISPY_TEMPLATE_PACK = "bootstrap5"
@@ -65,6 +100,7 @@ AUTH_USER_MODEL = 'accounts.CustomUser'
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.locale.LocaleMiddleware',
     'django.middleware.common.CommonMiddleware',
@@ -72,6 +108,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'cmt.ratelimit.RateLimitMiddleware',
+    'cmt.security.ContentSecurityPolicyMiddleware',
 ]
 
 ROOT_URLCONF = 'cmt.urls'
@@ -117,6 +155,14 @@ DATABASES = {
     }
 }
 
+
+# Cache (used for rate limiting)
+CACHES = {
+    'default': {
+        'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+        'LOCATION': 'ratelimit-cache',
+    }
+}
 
 # Password validation
 # https://docs.djangoproject.com/en/5.2/ref/settings/#auth-password-validators
@@ -169,10 +215,18 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # Static files
 STATIC_ROOT = os.path.join(BASE_DIR, 'staticfiles')
 STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
 }
+
+# Use simple static files storage during tests
+import sys
+if 'test' in sys.argv:
+    STORAGES["staticfiles"]["BACKEND"] = "django.contrib.staticfiles.storage.StaticFilesStorage"
 
 # Media files (user uploads)
 MEDIA_URL = '/media/'
@@ -192,11 +246,18 @@ EMAIL_HOST_USER = os.getenv('EMAIL_HOST_USER', '')
 EMAIL_HOST_PASSWORD = os.getenv('EMAIL_HOST_PASSWORD', '')
 DEFAULT_FROM_EMAIL = os.getenv('DEFAULT_FROM_EMAIL', 'IATM Conference <noreply@iatm.us>')
 
+# PayPal Payment Link (No Code Payments)
+PAYPAL_PAYMENT_LINK = os.getenv('PAYPAL_PAYMENT_LINK', 'https://www.paypal.com/ncp/payment/GS5U6A4CU5P2A')
+
 # Zoom API (Server-to-Server OAuth)
 ZOOM_ACCOUNT_ID = os.getenv('ZOOM_ACCOUNT_ID', '')
 ZOOM_CLIENT_ID = os.getenv('ZOOM_CLIENT_ID', '')
 ZOOM_CLIENT_SECRET = os.getenv('ZOOM_CLIENT_SECRET', '')
 ZOOM_USER_ID = os.getenv('ZOOM_USER_ID', 'me')
+
+# Google OAuth
+GOOGLE_OAUTH_CLIENT_ID = os.getenv('GOOGLE_OAUTH_CLIENT_ID', '')
+GOOGLE_OAUTH_CLIENT_SECRET = os.getenv('GOOGLE_OAUTH_CLIENT_SECRET', '')
 
 # Security settings
 SECURE_BROWSER_XSS_FILTER = True
@@ -211,6 +272,41 @@ if not DEBUG:
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
 
+# CORS settings
+CORS_ALLOWED_ORIGINS = [
+    o.strip() for o in os.getenv('CORS_ALLOWED_ORIGINS', '').split(',') if o.strip()
+]
+CORS_ALLOW_CREDENTIALS = True
+if not CORS_ALLOWED_ORIGINS:
+    CORS_ALLOW_ALL_ORIGINS = DEBUG  # Only allow all in dev
 
+# Logging
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+    },
+    'root': {
+        'handlers': ['console'],
+        'level': os.getenv('LOG_LEVEL', 'INFO'),
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': os.getenv('DJANGO_LOG_LEVEL', 'WARNING'),
+            'propagate': False,
+        },
+    },
+}
 
 

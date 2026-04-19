@@ -1,6 +1,7 @@
 from django.urls import path
 from django.contrib.auth import views as auth_views
 from . import views
+from . import oauth as views_oauth
 
 urlpatterns = [
     path('', views.home_redirect_view, name='home_redirect'),
@@ -41,4 +42,8 @@ urlpatterns = [
     path('privacy/', views.privacy_policy_view, name='privacy_policy'),
     path('export-data/', views.export_my_data, name='export_my_data'),
     path('delete-account/', views.delete_my_account, name='delete_my_account'),
+
+    # Google OAuth
+    path('google/login/', views_oauth.google_login, name='google_login'),
+    path('google/callback/', views_oauth.google_callback, name='google_callback'),
 ]

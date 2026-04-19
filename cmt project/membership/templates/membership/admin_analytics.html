@@ -58,7 +58,7 @@
 
 <!-- Charts Row -->
 <div class="row g-4 mb-4">
-    <!-- Registration Status Pie Chart -->
+    <!-- Registration Status Doughnut Chart -->
     <div class="col-12 col-md-6">
         <div class="card border-0 shadow-sm" style="border-radius: 16px;">
             <div class="card-header bg-white border-0 pt-4 px-4">
@@ -114,29 +114,32 @@
 </div>
 
 <!-- Chart.js CDN -->
-<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.7/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
 
 <script>
 document.addEventListener('DOMContentLoaded', function() {
-    const brandColors = ['#667eea', '#764ba2', '#28a745', '#f59e0b', '#ef4444', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6'];
+    const brandColors = ['#667eea', '#764ba2', '#28a745', '#f59e0b', '#ef4444', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6', '#6366f1', '#a855f7', '#06b6d4', '#84cc16', '#f43f5e'];
 
-    // Registration Status Pie
+    // Registration Status Doughnut
     new Chart(document.getElementById('registrationChart'), {
         type: 'doughnut',
         data: {
             labels: ['Paid', 'Unpaid'],
             datasets: [{
                 data: [{{ paid_registrations }}, {{ unpaid_registrations }}],
-                backgroundColor: ['#28a745', '#f59e0b'],
-                borderWidth: 0,
+                backgroundColor: ['#10b981', '#f59e0b'],
+                hoverBackgroundColor: ['#059669', '#d97706'],
+                borderWidth: 2,
+                borderColor: '#ffffff',
             }]
         },
         options: {
             responsive: true,
             plugins: {
-                legend: { position: 'bottom' },
+                legend: { position: 'bottom', labels: { padding: 20, usePointStyle: true, pointStyle: 'circle' } },
+                tooltip: { callbacks: { label: function(ctx) { return ctx.label + ': ' + ctx.raw + ' (' + Math.round(ctx.raw / ({{ paid_registrations }} + {{ unpaid_registrations }}) * 100) + '%)'; } } },
             },
-            cutout: '60%',
+            cutout: '65%',
         }
     });
 
@@ -148,30 +151,36 @@ document.addEventListener('DOMContentLoaded', function() {
             datasets: [{
                 label: 'Count',
                 data: [{{ authors }}, {{ reviewers }}, {{ chairs }}],
-                backgroundColor: ['#667eea', '#3b82f6', '#f59e0b'],
+                backgroundColor: ['#667eea', '#764ba2', '#f59e0b'],
+                hoverBackgroundColor: ['#5a6fd6', '#6a4192', '#d97706'],
                 borderRadius: 8,
-                barThickness: 40,
+                barThickness: 50,
             }]
         },
         options: {
             responsive: true,
             plugins: { legend: { display: false } },
             scales: {
-                y: { beginAtZero: true, ticks: { stepSize: 1 } },
+                y: { beginAtZero: true, ticks: { stepSize: 1 }, grid: { color: 'rgba(0,0,0,0.05)' } },
+                x: { grid: { display: false } },
             },
         }
     });
 
-    // Country Horizontal Bar
+    // Country Horizontal Bar (using JSON-serialized data)
+    const countryLabels = {{ country_labels|safe }};
+    const countryData = {{ country_data|safe }};
     new Chart(document.getElementById('countryChart'), {
         type: 'bar',
         data: {
-            labels: [{% for c in country_stats %}'{{ c.user__country|default:"N/A" }}'{% if not forloop.last %},{% endif %}{% endfor %}],
+            labels: countryLabels,
             datasets: [{
                 label: 'Attendees',
-                data: [{% for c in country_stats %}{{ c.count }}{% if not forloop.last %},{% endif %}{% endfor %}],
-                backgroundColor: brandColors.slice(0, {{ country_stats|length }}),
+                data: countryData,
+                backgroundColor: brandColors.slice(0, countryLabels.length),
+                hoverBackgroundColor: brandColors.slice(0, countryLabels.length).map(c => c + 'cc'),
                 borderRadius: 6,
+                barThickness: 18,
             }]
         },
         options: {
@@ -179,28 +188,33 @@ document.addEventListener('DOMContentLoaded', function() {
             indexAxis: 'y',
             plugins: { legend: { display: false } },
             scales: {
-                x: { beginAtZero: true, ticks: { stepSize: 1 } },
+                x: { beginAtZero: true, ticks: { stepSize: 1 }, grid: { color: 'rgba(0,0,0,0.05)' } },
+                y: { grid: { display: false } },
             },
         }
     });
 
-    // Occupation Doughnut
+    // Occupation Pie Chart (using JSON-serialized data)
+    const occupationLabels = {{ occupation_labels|safe }};
+    const occupationData = {{ occupation_data|safe }};
     new Chart(document.getElementById('occupationChart'), {
-        type: 'doughnut',
+        type: 'pie',
         data: {
-            labels: [{% for o in occupation_stats %}'{{ o.user__occupation|default:"Other" }}'{% if not forloop.last %},{% endif %}{% endfor %}],
+            labels: occupationLabels,
             datasets: [{
-                data: [{% for o in occupation_stats %}{{ o.count }}{% if not forloop.last %},{% endif %}{% endfor %}],
-                backgroundColor: brandColors.slice(0, {{ occupation_stats|length }}),
-                borderWidth: 0,
+                data: occupationData,
+                backgroundColor: brandColors.slice(0, occupationLabels.length),
+                hoverBackgroundColor: brandColors.slice(0, occupationLabels.length).map(c => c + 'cc'),
+                borderWidth: 2,
+                borderColor: '#ffffff',
             }]
         },
         options: {
             responsive: true,
             plugins: {
-                legend: { position: 'bottom', labels: { boxWidth: 12, padding: 15 } },
+                legend: { position: 'bottom', labels: { boxWidth: 12, padding: 15, usePointStyle: true, pointStyle: 'circle' } },
+                tooltip: { callbacks: { label: function(ctx) { const total = ctx.dataset.data.reduce((a, b) => a + b, 0); return ctx.label + ': ' + ctx.raw + ' (' + Math.round(ctx.raw / total * 100) + '%)'; } } },
             },
-            cutout: '55%',
         }
     });
 });

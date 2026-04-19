@@ -63,6 +63,7 @@
                                         <tr>
                                             <th>Name</th>
                                             <th>Organization</th>
+                                            <th>Payment</th>
                                             <th>Role 1</th>
                                             <th>Role 2</th>
                                             <th>Actions</th>
@@ -85,9 +86,26 @@
                                                 <span class="organization">{{ member.user.organization|default:"Not specified" }}</span>
                                             </td>
                                             <td>
+                                                <form method="POST" class="d-inline">
+                                                    {% csrf_token %}
+                                                    <input type="hidden" name="membership_id" value="{{ member.id }}">
+                                                    <input type="hidden" name="action" value="toggle_payment">
+                                                    {% if member.is_paid %}
+                                                    <button type="submit" class="btn btn-success btn-sm" title="Click to mark as unpaid">
+                                                        <i class="fas fa-check-circle me-1"></i> Paid
+                                                    </button>
+                                                    {% else %}
+                                                    <button type="submit" class="btn btn-warning btn-sm" title="Click to confirm payment">
+                                                        <i class="fas fa-clock me-1"></i> Unpaid
+                                                    </button>
+                                                    {% endif %}
+                                                </form>
+                                            </td>
+                                            <td>
                                                 <form method="POST" class="role-form">
                                                     {% csrf_token %}
                                                     <input type="hidden" name="membership_id" value="{{ member.id }}">
+                                                    <input type="hidden" name="action" value="update_roles">
                                                     <select name="role1" class="form-select role-select">
                                                         {% for key, label in Role.choices %}
                                                         <option value="{{ key }}" {% if member.role1 == key %}selected{% endif %}>{{ label }}</option>

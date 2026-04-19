@@ -17,7 +17,15 @@ reportlab==4.1.0
 qrcode[pil]==7.4.2
 Pillow==10.2.0
 
+# API
+djangorestframework==3.15.1
+django-filter==24.2
+
+# Calendar
+icalendar==5.0.11
+
 # Production
 gunicorn==21.2.0
 whitenoise==6.6.0
 sentry-sdk==1.40.0
+django-cors-headers==4.3.1

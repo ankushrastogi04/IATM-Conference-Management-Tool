@@ -2,6 +2,7 @@ from django.contrib.auth.decorators import login_required
 from django.shortcuts import render, redirect, get_object_or_404
 from django.db.models import Q
 from django.contrib import messages
+from django.core.paginator import Paginator
 from .forms import SubmissionForm
 from .models import Submissions
 from conference.models import Conference
@@ -136,7 +137,10 @@ def submission_list(request):
 
         all_submissions = (all_submissions | co_authored_submissions).distinct()
 
-    for submission in all_submissions:
+    paginator = Paginator(all_submissions, 20)
+    page_obj = paginator.get_page(request.GET.get('page'))
+
+    for submission in page_obj:
         is_co_author = request.user in [submission.co_author1, submission.co_author2, submission.co_author3]
         submission.is_co_author = is_co_author
 
@@ -156,7 +160,8 @@ def submission_list(request):
         submission.roles = sorted(list(roles))
 
     return render(request, 'submissions/submission_list.html', {
-        'all_submissions': all_submissions,
+        'all_submissions': page_obj,
+        'page_obj': page_obj,
         'is_chair': is_chair,
         'is_reviewer': is_reviewer,
         'user': request.user,

@@ -26,6 +26,7 @@ from django.http import JsonResponse
 urlpatterns = [
     path('health/', lambda r: JsonResponse({'status': 'ok'})),
     path('i18n/', include('django.conf.urls.i18n')),
+    path('api/', include('api.urls')),
 ]
 
 urlpatterns += i18n_patterns(

@@ -5,6 +5,7 @@ from django.contrib import messages
 from django.db.models import Q, Count
 from django.utils import timezone
 from django.http import JsonResponse
+from django.core.paginator import Paginator
 
 from submissions.models import Submissions
 from membership.models import Membership, Role
@@ -14,12 +15,9 @@ from .forms import ReviewForm, AssignReviewersForm
 from submissions.emails import send_reviewer_assignment, send_review_notification
 
 
-@login_required
+@staff_member_required
 def debug_reviewers(request, conference_id):
     """Temporary debug view to check reviewer data"""
-    if not request.user.is_staff:
-        return JsonResponse({'error': 'Staff only'}, status=403)
-    
     try:
         conference = Conference.objects.get(id=conference_id)
         
@@ -77,6 +75,15 @@ def debug_reviewers(request, conference_id):
 @login_required
 def chair_review_assignments(request):
     """Chair dashboard for managing review assignments"""
+    # Ensure user is staff or a chair of at least one conference
+    if not request.user.is_staff:
+        is_any_chair = Membership.objects.filter(user=request.user).filter(
+            Q(role1='Chair') | Q(role2='Chair')
+        ).exists()
+        if not is_any_chair:
+            messages.error(request, "You must be a conference chair or staff to access review assignments.")
+            return redirect('user_dashboard')
+
     # Get conferences where user is chair or staff
     if request.user.is_staff:
         chair_memberships = Membership.objects.filter(
@@ -115,9 +122,13 @@ def chair_review_assignments(request):
 
     # Get unassigned submissions
     unassigned_submissions = submissions.filter(reviews__isnull=True) if selected_conference else Submissions.objects.none()
-    
+
     # Calculate total submissions count
     total_submissions = submissions.count() if selected_conference else 0
+
+    # Paginate the flat submissions list
+    paginator = Paginator(submissions, 20)
+    page_obj = paginator.get_page(request.GET.get('page'))
 
     context = {
         'chair_conferences': chair_conferences,
@@ -127,6 +138,8 @@ def chair_review_assignments(request):
         'unassigned_submissions': unassigned_submissions,
         'tracks': tracks,
         'total_submissions': total_submissions,
+        'submissions': page_obj,
+        'page_obj': page_obj,
     }
     return render(request, 'review/chair_review_assignments.html', context)
 

@@ -4,6 +4,7 @@ from .forms import login_form, CustomUserCreationForm, ProfileEditForm
 from django.contrib.auth import authenticate, login, logout
 from .models import CustomUser
 from django.contrib import messages
+from django.conf import settings as django_settings
 from membership.models import Membership, Role
 from django.db.models import Q
 
@@ -16,7 +17,10 @@ def login_view(request):
         login(request, form.get_user())
         return redirect('profile')
 
-    return render(request, 'accounts/login.html', {'form': form})
+    return render(request, 'accounts/login.html', {
+        'form': form,
+        'google_oauth_enabled': bool(django_settings.GOOGLE_OAUTH_CLIENT_ID),
+    })
 
 
 def register_view(request):

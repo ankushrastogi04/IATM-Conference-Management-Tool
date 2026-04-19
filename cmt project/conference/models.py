@@ -93,6 +93,7 @@ class Payment(models.Model):
     currency = models.CharField(max_length=3, default='USD')
     paypal_order_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
     paypal_payment_id = models.CharField(max_length=255, unique=True, null=True, blank=True)
+    promo_code = models.ForeignKey('PromoCode', on_delete=models.SET_NULL, null=True, blank=True)
     status = models.CharField(max_length=20, choices=PAYMENT_STATUS_CHOICES, default='pending')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -102,6 +103,50 @@ class Payment(models.Model):
 
     def __str__(self):
         return f"{self.user.email} - {self.conference.conference_name} - ${self.amount} ({self.status})"
+
+
+class PromoCode(models.Model):
+    DISCOUNT_TYPES = [
+        ('percentage', 'Percentage'),
+        ('fixed', 'Fixed Amount'),
+    ]
+
+    conference = models.ForeignKey(Conference, on_delete=models.CASCADE, related_name='promo_codes')
+    code = models.CharField(max_length=50)
+    discount_type = models.CharField(max_length=10, choices=DISCOUNT_TYPES, default='percentage')
+    discount_value = models.DecimalField(max_digits=10, decimal_places=2, help_text="Percentage (0-100) or fixed USD amount")
+    max_uses = models.PositiveIntegerField(default=0, help_text="0 = unlimited")
+    times_used = models.PositiveIntegerField(default=0)
+    valid_from = models.DateTimeField()
+    valid_until = models.DateTimeField()
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        unique_together = ('conference', 'code')
+
+    def __str__(self):
+        return f"{self.code} ({self.conference.conference_name})"
+
+    @property
+    def is_valid(self):
+        from django.utils import timezone
+        now = timezone.now()
+        if not self.is_active:
+            return False
+        if now < self.valid_from or now > self.valid_until:
+            return False
+        if self.max_uses > 0 and self.times_used >= self.max_uses:
+            return False
+        return True
+
+    def apply_discount(self, price):
+        if not self.is_valid:
+            return price
+        if self.discount_type == 'percentage':
+            discount = price * self.discount_value / 100
+        else:
+            discount = min(self.discount_value, price)
+        return round(max(price - discount, 0), 2)
 
 
 class Track(models.Model):

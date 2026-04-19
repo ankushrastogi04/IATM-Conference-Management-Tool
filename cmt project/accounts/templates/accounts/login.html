@@ -22,10 +22,19 @@
         </div>
       </form>
 
+      {% if google_oauth_enabled %}
+      <div class="text-center mt-3">
+        <p class="text-muted mb-2">&mdash; {% trans "or" %} &mdash;</p>
+        <a href="{% url 'google_login' %}" class="btn btn-outline-dark w-100">
+          <i class="fab fa-google me-2"></i> {% trans "Sign in with Google" %}
+        </a>
+      </div>
+      {% endif %}
+
       <!-- Links -->
       <div class="mt-4 text-center">
-        <a href="{% url ‘password_reset’ %}" class="text-decoration-none">{% trans "Forgot password?" %}</a><br>
-        <a href="{% url ‘register’ %}" class="text-decoration-none">{% trans "Don’t have an account? Register" %}</a>
+        <a href="{% url 'password_reset' %}" class="text-decoration-none">{% trans "Forgot password?" %}</a><br>
+        <a href="{% url 'register' %}" class="text-decoration-none">{% trans "Don't have an account? Register" %}</a>
       </div>
     </div>
 

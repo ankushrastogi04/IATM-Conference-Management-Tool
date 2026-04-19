@@ -1,0 +1,51 @@
+# docker-compose.backup.yml
+#
+# Adds a scheduled database backup service to the IATM stack.
+#
+# Usage (run alongside the main compose file):
+#   docker compose -f docker-compose.yml -f scripts/docker-compose.backup.yml up -d
+#
+# The backup service runs pg_dump every day at 02:00 UTC by default.
+# Override the schedule with the BACKUP_CRON environment variable.
+
+services:
+  backup:
+    image: postgres:16-alpine
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      DB_NAME: iatm_conference_db
+      DB_USER: iatm_user
+      DB_PASSWORD: testing1234
+      DB_HOST: db
+      DB_PORT: "5432"
+      BACKUP_DIR: /backups
+      RETENTION_DAYS: "30"
+      # cron schedule: minute hour day month weekday (default: daily at 02:00)
+      BACKUP_CRON: "${BACKUP_CRON:-0 2 * * *}"
+    volumes:
+      - ./backups:/backups
+      - ./scripts/backup_db.sh:/usr/local/bin/backup_db.sh:ro
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - |
+        # Install bash (needed by the backup script)
+        apk add --no-cache bash >/dev/null 2>&1
+
+        # Run one backup immediately on container start
+        echo "Running initial backup..."
+        bash /usr/local/bin/backup_db.sh
+
+        # Write the cron schedule
+        echo "$${BACKUP_CRON} bash /usr/local/bin/backup_db.sh >> /proc/1/fd/1 2>&1" \
+          > /etc/crontabs/root
+
+        echo "Cron scheduled: $${BACKUP_CRON}"
+        # Start crond in the foreground so the container stays alive
+        crond -f -l 2
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+    external: true
