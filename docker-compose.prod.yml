@@ -39,7 +39,8 @@ services:
     image: nginx:1.27-alpine
     restart: always
     volumes:
-      - ./deploy/nginx.prod.conf:/etc/nginx/conf.d/default.conf:ro
+      # Use nginx.conf for HTTP-only, switch to nginx.prod.conf after adding SSL
+      - ./deploy/nginx.conf:/etc/nginx/conf.d/default.conf:ro
       - staticfiles:/static:ro
       - media:/media:ro
       - certbot-www:/var/www/certbot:ro
