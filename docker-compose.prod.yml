@@ -3,7 +3,7 @@ services:
     image: postgres:16-alpine
     restart: always
     env_file:
-      - "./cmt project/.env"
+      - .env.prod
     volumes:
       - pgdata:/var/lib/postgresql/data
       - dbbackups:/backups
@@ -24,7 +24,7 @@ services:
       - staticfiles:/app/cmt\ project/staticfiles
       - media:/app/cmt\ project/media
     env_file:
-      - "./cmt project/.env"
+      - .env.prod
     environment:
       DB_HOST: db
     depends_on:
