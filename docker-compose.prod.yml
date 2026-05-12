@@ -4,15 +4,11 @@ services:
     restart: always
     env_file:
       - "./cmt project/.env"
-    environment:
-      POSTGRES_DB: ${DB_NAME:-iatm_conference_db}
-      POSTGRES_USER: ${DB_USER:-iatm_user}
-      POSTGRES_PASSWORD: ${DB_PASSWORD}
     volumes:
       - pgdata:/var/lib/postgresql/data
       - dbbackups:/backups
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DB_USER:-iatm_user} -d ${DB_NAME:-iatm_conference_db}"]
+      test: ["CMD-SHELL", "pg_isready -U iatm_user -d iatm_conference_db"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -57,7 +53,6 @@ services:
     volumes:
       - certbot-www:/var/www/certbot
       - certbot-conf:/etc/letsencrypt
-    # Replace YOUR_DOMAIN and YOUR_EMAIL below
     command: certonly --webroot -w /var/www/certbot --email YOUR_EMAIL -d YOUR_DOMAIN --agree-tos --no-eff-email
     profiles:
       - certbot
