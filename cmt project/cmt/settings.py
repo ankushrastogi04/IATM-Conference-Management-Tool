@@ -44,6 +44,13 @@ DEBUG = os.getenv('DEBUG', 'True').lower() == 'true'
 
 ALLOWED_HOSTS = [h.strip() for h in os.getenv('ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',') if h.strip()]
 
+# CSRF trusted origins (required for production behind reverse proxy)
+CSRF_TRUSTED_ORIGINS = [
+    f'https://{h}' for h in ALLOWED_HOSTS if h not in ('localhost', '127.0.0.1')
+] + [
+    f'http://{h}' for h in ALLOWED_HOSTS if h not in ('localhost', '127.0.0.1')
+]
+
 
 # Application definition
 
