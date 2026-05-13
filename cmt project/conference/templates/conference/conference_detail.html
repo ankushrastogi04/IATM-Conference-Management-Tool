@@ -176,14 +176,25 @@
                         Conference Tracks / Sub-Themes
                     </h3>
                     <p style="color: #6c757d; margin-bottom: 1.5rem;">
-                        We welcome submissions across all business and technology domains. Select a track that best aligns with your research.
+                        We welcome submissions across all business and technology domains. Click on a track to learn more.
                     </p>
-                    <div class="row g-3">
+                    <div class="accordion" id="tracksAccordion">
                         {% for track in tracks %}
-                        <div class="col-12 col-md-6 col-lg-4">
-                            <div style="background: #f8fafc; border-radius: 12px; padding: 1rem 1.25rem; border-left: 4px solid #667eea; height: 100%;">
-                                <i class="fas fa-chevron-right me-2" style="color: #667eea; font-size: 0.8rem;"></i>
-                                <span style="font-weight: 500; color: #2c3e50;">{{ track.name }}</span>
+                        <div class="accordion-item" style="border: none; margin-bottom: 0.5rem;">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#track{{ track.id }}" style="background: #f8fafc; border-left: 4px solid #667eea; border-radius: 12px; font-weight: 500; color: #2c3e50;">
+                                    <i class="fas fa-chevron-right me-2" style="color: #667eea; font-size: 0.8rem;"></i>
+                                    {{ track.name }}
+                                </button>
+                            </h2>
+                            <div id="track{{ track.id }}" class="accordion-collapse collapse" data-bs-parent="#tracksAccordion">
+                                <div class="accordion-body" style="color: #495057; padding: 1rem 1.25rem 1rem 2rem;">
+                                    {% if track.description %}
+                                        {{ track.description }}
+                                    {% else %}
+                                        Research submissions related to {{ track.name }} are welcome under this track.
+                                    {% endif %}
+                                </div>
                             </div>
                         </div>
                         {% endfor %}

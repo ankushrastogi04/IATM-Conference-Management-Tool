@@ -152,7 +152,8 @@ class PromoCode(models.Model):
 class Track(models.Model):
     conference = models.ForeignKey(Conference, on_delete=models.CASCADE, related_name='tracks')
     name = models.CharField(max_length=200)
-    
+    description = models.TextField(blank=True, default='')
+
     class Meta:
         unique_together = ('conference', 'name')
         ordering = ['name']
