@@ -166,6 +166,31 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Conference Tracks -->
+            {% if tracks %}
+            <div class="conference-detail-card mb-4">
+                <div class="conference-detail-card-body">
+                    <h3 class="conference-title" style="font-size: 1.5rem;">
+                        <i class="fas fa-stream me-2" style="color: #667eea;"></i>
+                        Conference Tracks / Sub-Themes
+                    </h3>
+                    <p style="color: #6c757d; margin-bottom: 1.5rem;">
+                        We welcome submissions across all business and technology domains. Select a track that best aligns with your research.
+                    </p>
+                    <div class="row g-3">
+                        {% for track in tracks %}
+                        <div class="col-12 col-md-6 col-lg-4">
+                            <div style="background: #f8fafc; border-radius: 12px; padding: 1rem 1.25rem; border-left: 4px solid #667eea; height: 100%;">
+                                <i class="fas fa-chevron-right me-2" style="color: #667eea; font-size: 0.8rem;"></i>
+                                <span style="font-weight: 500; color: #2c3e50;">{{ track.name }}</span>
+                            </div>
+                        </div>
+                        {% endfor %}
+                    </div>
+                </div>
+            </div>
+            {% endif %}
         </div>
     </div>
 </div>

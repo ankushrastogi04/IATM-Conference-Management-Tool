@@ -21,7 +21,11 @@ def conference_list_view(request):
 @login_required
 def conference_detail_view(request, slug):
     conference = get_object_or_404(Conference, slug=slug)
-    return render(request, 'conference/conference_detail.html', {'conference': conference})
+    tracks = conference.tracks.all()
+    return render(request, 'conference/conference_detail.html', {
+        'conference': conference,
+        'tracks': tracks,
+    })
 
 @login_required
 def payment_checkout(request, slug):
